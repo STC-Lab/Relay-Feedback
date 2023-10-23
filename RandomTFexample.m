@@ -130,17 +130,18 @@ end
 % freqresp
 %% Limitcycle check
 N = 1000;
-k = fftfreq(N, 1/Ts);
-u_guess = [ones(1,N/4) Ts/10:Ts/10:(N/20)*Ts zeros(1, N/4)];
-[x0, T] = zerofinding(Gd_pos,Gd_neg, N, k, u_guess);
+k = (1/Ts)/N*(-N/2:N/2-1);
+u_guess = [-ones(1,N/2) ones(1,N/2)];
+figure();
+[x0, T] = zerofinding(Gpos,Gneg, N, k, u_guess);
+legend
 figure
-plot(T, x0)
+plot(0:1:T-1, x0)
 %% Functions
-function [x0, N] = zerofinding(Gd_pos, Gd_neg, N, k, u_guess)
-    [FRF_pos, ~] = freqresp(Gd_pos,1i*k);
-    [FRF_neg,~] = freqresp(Gd_neg,1);
-    FRF_pos = squeeze(FRF_pos)';
-    FRF_neg = squeeze(FRF_neg)';
+function [x0, N] = zerofinding(Gpos, Gneg, N, k, u_guess)
+    [FRF_pos, ~] = freqresp(Gpos,2*pi*k);
+    FRF_pos = flip(squeeze(FRF_pos))';
+    FRF_neg = evalfr(Gneg,1);
     count = 0;
     x0 = u_guess;
     epsilon = 0.01;
@@ -158,16 +159,20 @@ function [x0, N] = zerofinding(Gd_pos, Gd_neg, N, k, u_guess)
                 break
             end
         end
-
+        check_out = max(abs(x0-x1))/max(abs(x0));
         if max(abs(x0-x1))/max(abs(x0)) < epsilon
             break
         elseif iters ~= 0 && count >= iters
             break
         elseif max(abs(x0-x1)) > M
             error("Unstable!!")
+        elseif count == 1001
+            break
         end
-        fprintf("Outer iterations: %d\n", count)
-        plot(N, x0)
+        if mod(count,100) == 0
+            fprintf("Outer iterations: %d\n", count)
+            plot(0:1:N-1,x0), hold on
+        end
         if false
             i = 1;
             for k = length(x0)-1:-1:1
@@ -185,14 +190,14 @@ end
 
 
 function i0 = DRsplitting_RF(FRF_pos, FRF_neg, F2, i)
-    epsilon = 0.1; M = 1e4; alpha = 0.5;
+    epsilon = 0.01; M = 1e4; alpha = 0.5;
     count = 0;
     i0 = i;
     while true
         count = count + 1;
         i1 = i0;
         y_fft = compute_resolvent(i0, FRF_pos);
-        x_half = y_fft + FRF_neg.*ones(1,length(y_fft));
+        x_half = y_fft - FRF_neg;
         z_half = 2*x_half -i0;
 
         x = zeros(size(z_half));
@@ -200,13 +205,13 @@ function i0 = DRsplitting_RF(FRF_pos, FRF_neg, F2, i)
             x(i) = prox_l(F2, i0, -1, 1);
         end
         i0 = i0 + x - x_half;
-
+        %check_in = max(abs(i0-i1))/max(abs(i0))
         if max(abs(i0-i1))/max(abs(i0))< epsilon
             break
         elseif max(abs(i0-i1))> M
             error("Unstable!!")
         end
-        if mod(count,10) == 0
+        if mod(count,100) == 0
             fprintf("Inner iterations : %d\n", count)
         end
     end
