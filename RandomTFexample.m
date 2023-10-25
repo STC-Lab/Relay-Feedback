@@ -98,7 +98,7 @@ v = Act*x_eq - Bct;
 W = (eye(size(Act))-(v*Cct)/(Cct*v))*expm(Act*t_eq);
 eig_W = eig(W);
 if abs(eig_W) < 1
-    fprintf("limitcycle is locally stable \n")
+    fprintf(" limitcycle is locally stable \n")
 end
 %simulate a trajectory
 delta_x = zeros(3,k_sim/100000+1);
@@ -129,25 +129,33 @@ end
 % Difference was neglible, choose the easiest and foolproof method:
 % freqresp
 %% Limitcycle check
-N = 1000;
+N = 2300;
+period = 80*23.7*pi;
+T_1 =  linspace(0, period, N);
 k = (1/Ts)/N*(-N/2:N/2-1);
-u_guess = [-ones(1,N/2) ones(1,N/2)];
+%u_guess = [-1.2*ones(1, length(T_1(1:1050))) (1.4+1.2)/(T_1(2100)-T_1(1051))*(T_1(1051:2100)-T_1(1051))-1.2 1.4*ones(1,length(T_1(2101:end)))];
+u_guess = ones(1,length(T_1));
 figure();
 [x0, T] = zerofinding(Gpos,Gneg, N, k, u_guess);
+% r = 1.5*randn(1,10)
+% n = normalcone(r)
 legend
 figure
 plot(0:1:T-1, x0)
 %% Functions
 function [x0, N] = zerofinding(Gpos, Gneg, N, k, u_guess)
-    [FRF_pos, ~] = freqresp(Gpos,2*pi*k);
-    FRF_pos = flip(squeeze(FRF_pos))';
-    FRF_neg = evalfr(Gneg,1);
-    count = 0;
-    x0 = u_guess;
     epsilon = 0.01;
     M = 1e4;
     alpha = 0.01;
+
     iters = 0;
+    count = 0;
+    x0 = u_guess;
+
+    [FRF_pos, ~] = freqresp(Gpos,2*pi*k);
+    FRF_pos = flip(squeeze(FRF_pos))';
+    FRF_neg = evalfr(Gneg,1);
+
     while true
         count = count +1;
         x1 = x0;
@@ -190,22 +198,25 @@ end
 
 
 function i0 = DRsplitting_RF(FRF_pos, FRF_neg, F2, i)
-    epsilon = 0.01; M = 1e4; alpha = 0.5;
+    epsilon = 0.001; 
+    M = 1e4; 
+    alpha = 0.5;
+
     count = 0;
     i0 = i;
     while true
         count = count + 1;
         i1 = i0;
         y_fft = compute_resolvent(i0, FRF_pos);
-        x_half = y_fft - FRF_neg;
-        z_half = 2*x_half -i0;
+        x_half = y_fft + FRF_neg;
+        z_half = 2*x_half - i0;
 
         x = zeros(size(z_half));
         for i = 1:length(z_half)
             x(i) = prox_l(F2, i0, -1, 1);
         end
         i0 = i0 + x - x_half;
-        %check_in = max(abs(i0-i1))/max(abs(i0))
+        check_in = max(abs(i0-i1))/max(abs(i0));
         if max(abs(i0-i1))/max(abs(i0))< epsilon
             break
         elseif max(abs(i0-i1))> M
