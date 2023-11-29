@@ -70,9 +70,9 @@ for i = 1:k_sim
 end
 t_sim = (0:k_sim)*Ts;
 figure;
-plot(t_sim(1:200), u(1:200))
+plot(t_sim(1:100), u(1:100))
 hold on
-plot(t_sim(1:200), y(1:200))
+plot(t_sim(1:100), y(1:100))
 xlabel('simulation time [s]')
 ylabel('Relay output [-]')
 hold off
@@ -114,43 +114,51 @@ end
 % hold off
 
 %% Checking the difference between various methods to determine the
-% frequency response
+%frequency response
 % [Gd_pos_den, Gd_pos_num] = tfdata(Gd_pos,'V')
 % FR_pos = ((Gd_pos_den(1)*j*k).^2+(Gd_pos_den(2)*j*k)+Gd_pos_den(3))./((Gd_pos_num(1)*j*k).^2+(Gd_pos_num(2)*j*k)+Gd_pos_num(3))% FR_2 =squeeze(FR_2)'
 % for i = 1:length(k)
 %     FR_1(i) = evalfr(Gd_pos,j*k(i));
 % end
+% FR_2 = freqresp(Gd_pos,j*k)
+% FR_2 = flip(squeeze(FR_2))
 % figure
 % semilogx(k, abs(FR_pos), k,abs(FR_2) ,k,abs(FR_1))
-%
+% 
 % isequaltol(FR_pos,FR_2, 0.1)
 % isequaltol(FR_pos,FR_2, 0.1)
 % isequaltol(FR_1,FR_2, 0.1)
 % Difference was neglible, choose the easiest and foolproof method:
 % freqresp
 %% Limitcycle check
-N = 1000;
-k = fftfreq(N, 1/Ts);
-u_guess = [ones(1,N/4) Ts/10:Ts/10:(N/20)*Ts zeros(1, N/4)];
-[x0, T] = zerofinding(Gd_pos,Gd_neg, N, k, u_guess);
+N = 500;
+T = linspace(1,N,N);
+ts = T(2)-T(1);
+k = (1/ts)/N*(-N/2:N/2-1);
+u_guess =[ones(1,N/2) -ones(1,N/2)]; %linspace(-1,1,N);
+[x0, T] = zerofinding(Gpos,Gneg,T, N, k, u_guess);
+legend
 figure
 plot(T, x0)
 %% Functions
-function [x0, N] = zerofinding(Gd_pos, Gd_neg, N, k, u_guess)
-    [FRF_pos, ~] = freqresp(Gd_pos,1i*k);
-    [FRF_neg,~] = freqresp(Gd_neg,1);
-    FRF_pos = squeeze(FRF_pos)';
-    FRF_neg = squeeze(FRF_neg)';
+function [x0, T] = zerofinding(Gpos, Gneg,T, N, k, u_guess)
+    epsilon = 0.0001;
+    M = 1e6;
+    alpha = 0.1;
+    iters = 0;
+    
+    FRF_pos= flip(squeeze(freqresp((1+alpha*Gpos)^-1,2*pi*k)))';
+    FRF_neg = flip(squeeze(freqresp(Gneg,2*pi*k)))';
+    
     count = 0;
     x0 = u_guess;
-    epsilon = 0.01;
-    M = 1e4;
-    alpha = 0.01;
-    iters = 0;
+
     while true
         count = count +1;
         x1 = x0;
-        x0 = DRsplitting_RF(FRF_pos, FRF_neg, normalcone(x0), x0);
+        x_star = lsim(Gneg,x0,T);
+        x_star = x_star';
+        x0 = DRsplitting_RF(FRF_pos, Gpos, x_star, x0);
         i = 1;
         for k = 1:length(x0)-1
             if x0(k)*x0(k+1) <= 0
@@ -158,16 +166,23 @@ function [x0, N] = zerofinding(Gd_pos, Gd_neg, N, k, u_guess)
                 break
             end
         end
-
+        %x0 = [x0(i:end) x0(1:i-1)];
+        %check_out = max(abs(x0-x1))/max(abs(x0))
         if max(abs(x0-x1))/max(abs(x0)) < epsilon
             break
         elseif iters ~= 0 && count >= iters
             break
         elseif max(abs(x0-x1)) > M
             error("Unstable!!")
+        elseif count == 1000
+            break
         end
-        fprintf("Outer iterations: %d\n", count)
-        plot(N, x0)
+            fprintf("Outer iterations: %d\n", count)
+            figure(6)
+
+            plot(0:1:N-1,x0)
+            drawnow
+            %pause(2)
         if false
             i = 1;
             for k = length(x0)-1:-1:1
@@ -184,31 +199,49 @@ function [x0, N] = zerofinding(Gd_pos, Gd_neg, N, k, u_guess)
 end
 
 
-function i0 = DRsplitting_RF(FRF_pos, FRF_neg, F2, i)
-    epsilon = 0.1; M = 1e4; alpha = 0.5;
+function i0 = DRsplitting_RF(FRF_pos, Gpos, x_star, x0)
+    epsilon = 0.0001; M = 1e6; alpha = 0.1;
     count = 0;
-    i0 = i;
+    i0 = x0;
     while true
         count = count + 1;
         i1 = i0;
-        y_fft = compute_resolvent(i0, FRF_pos);
-        x_half = y_fft + FRF_neg.*ones(1,length(y_fft));
-        z_half = 2*x_half -i0;
+        y_fft = lsim((1+alpha*Gpos)^-1,i0+alpha*x_star,0:1:length(x0)-1);%%compute_resolvent(i0+alpha*x_star, FRF_pos);
+        y2_fft =compute_resolvent(i0+alpha*x_star, FRF_pos); %compute_resolvent(x0,FRF_neg);
+        % figure
+        % plot(y_fft)
+        % hold on
+        % plot(y2_fft)
+        % drawnow
+        % legend('lsim', 'compute resolvent')
 
+        %x_half =y2_fft;%
+        x_half = y_fft';
+        z_half = 2*x_half - i0;
+        
         x = zeros(size(z_half));
         for i = 1:length(z_half)
-            x(i) = prox_l(F2, i0, -1, 1);
+            x(i) = resolvent_normalcone(z_half(i));
         end
-        i0 = i0 + x - x_half;
 
+
+        i0 = i0 + x - x_half;
+        % figure(7)
+        %     if mod(count,10) == 0
+        %     plot(1:1:length(x0),i0), hold on
+        %     drawnow
+        %     end
+        check = max(abs(i0-i1))/max(abs(i0));
         if max(abs(i0-i1))/max(abs(i0))< epsilon
             break
         elseif max(abs(i0-i1))> M
             error("Unstable!!")
         end
-        if mod(count,10) == 0
+        if mod(count,100) == 0
             fprintf("Inner iterations : %d\n", count)
         end
+        %pause(2)
+        
     end
 end
 
@@ -229,21 +262,33 @@ function y = normalcone(u)
         end
     end
 end
-
-function x = prox_l(df, v, l, u)
+function  y = resolvent_normalcone(x)
+    for i = 1:length(x)
+        if abs(x) < 1
+            y= x;
+        elseif x>= 1
+            y = 1;
+        elseif x <= -1
+            y =-1;
+        end
+    end
+end
+function x = prox_l(v, l, u)
     lambda = 0.5;
     epsilon = 0.1;
+    l = l+0.01;
+    u = u -0.01;
     	x = v;
     while u-l > epsilon
-        g = df + (1\lambda)*(x-v);
+        g = normalcone(x) + (1\lambda)*(x-v);
         a = x - lambda*g;
         b = x;
         if g <0
             a = x;
             b = x-lambda*g;
         end
-        l = max([l ,a]);
-        u = min([u, b]);
+        l = max(l ,a);
+        u = min(u, b);
         x = (l+u)/2;
     end
 end
